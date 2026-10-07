@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "github-runner-ansible"
+version = "0.1.0"
+description = "Ansible playbook and tooling for deploying isolated GitHub Actions runners in Lima VM"
+requires-python = ">=3.10"
+
+dependencies = [
+    "ansible>=9.0.0",
+    "ansible-core>=2.16.0",
+    "cryptography>=42.0.0",
+    "requests>=2.31.0",
+    "pyyaml>=6.0.1",
+    "jinja2>=3.1.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ansible-lint>=24.2.0",
+    "yamllint>=1.35.0",
+]
+
+[tool.setuptools]
+packages = []
+py-modules = []
+

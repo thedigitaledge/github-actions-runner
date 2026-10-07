@@ -1,0 +1,140 @@
+---
+- name: Run System Diagnostics for Containerized Lima VM and GitHub Runners
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - "{{ playbook_dir }}/vars/vault.yml"
+    - "{{ playbook_dir }}/vars/runners.yml"
+
+  vars:
+    container_name: "lima-vm-container"
+    lima_vm_name: "github-runner"
+    podman_bin: >-
+      {% if lookup('ansible.builtin.file', '/run/.containerenv', errors='ignore') | length > 0 %}
+      {% if lookup('ansible.builtin.pipe', 'command -v distrobox-host-exec') | length > 0 %}
+      distrobox-host-exec podman
+      {% elif lookup('ansible.builtin.pipe', 'command -v flatpak-spawn') | length > 0 %}
+      flatpak-spawn --host podman
+      {% else %}
+      podman
+      {% endif %}
+      {% else %}
+      podman
+      {% endif %}
+
+  tasks:
+    - name: "Inspect Host Podman Container Status"
+      ansible.builtin.command:
+        cmd: "{{ podman_bin }} ps -f name={{ container_name }}"
+      register: host_container_status
+      changed_when: false
+      failed_when: false
+
+    - name: "Check QEMU Image Tool Version inside Container"
+      ansible.builtin.command:
+        cmd: "{{ podman_bin }} exec -u lima {{ container_name }} qemu-img --version"
+      register: qemu_version
+      changed_when: false
+      failed_when: false
+
+    - name: "Inspect Lima VM Status"
+      ansible.builtin.command:
+        cmd: "{{ podman_bin }} exec -u lima {{ container_name }} limactl list {{ lima_vm_name }}"
+      register: lima_vm_status
+      changed_when: false
+      failed_when: false
+
+    - name: "Check USB Hardware Detection (lsusb) inside Guest VM"
+      ansible.builtin.command:
+        cmd: "{{ podman_bin }} exec -u lima {{ container_name }} limactl shell {{ lima_vm_name }} -- lsusb"
+      register: guest_lsusb
+      changed_when: false
+      failed_when: false
+
+    - name: "Check TTY ACM Serial Devices inside Guest VM"
+      ansible.builtin.command:
+        cmd: "{{ podman_bin }} exec -u lima {{ container_name }} limactl shell {{ lima_vm_name }} -- sh -c 'ls -la /dev/ttyACM*'"
+      register: guest_tty_devices
+      changed_when: false
+      failed_when: false
+
+    - name: "List Active Runner Containers inside Guest VM"
+      ansible.builtin.command:
+        cmd: "{{ podman_bin }} exec -u lima {{ container_name }} limactl shell {{ lima_vm_name }} -- sudo podman ps"
+      register: guest_runner_containers
+      changed_when: false
+      failed_when: false
+
+    - name: "Verify Serial Device Write Access for Each Runner Container"
+      ansible.builtin.command:
+        cmd: >
+          {{ podman_bin }} exec -u lima {{ container_name }}
+          limactl shell {{ lima_vm_name }} --
+          sudo timeout 10s bash -c '
+            c="{{ item.name }}";
+            if podman ps --format "{% raw %}{{.Names}}{% endraw %}" | grep -q "^${c}$"; then
+              for dev in {% if item.devices is defined and item.devices | length > 0 %}{% for d in item.devices %}"{{ d }}" {% endfor %}{% else %}"/dev/ttyACM0" "/dev/ttyACM1" "/dev/ttyACM2"{% endif %}; do
+                if podman exec "$c" test -w "$dev" 2>/dev/null; then
+                  echo "$dev: Writable";
+                else
+                  echo "$dev: NOT Writable / Missing";
+                fi;
+              done;
+            else
+              echo "Container Status: NOT Running";
+            fi;
+          '
+      loop: "{{ github_runners }}"
+      register: runner_permissions_sweep
+      changed_when: false
+      failed_when: false
+      timeout: 30
+
+    - name: "Query GitHub API Runner Online Status"
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ item.owner }}/{{ item.repo }}/actions/runners"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ github_pat }}"
+          Accept: "application/vnd.github+json"
+          X-GitHub-Api-Version: "2022-11-28"
+        status_code: 200
+      loop: "{{ github_runners }}"
+      when: github_pat is defined and github_pat | length > 0
+      register: github_api_status
+      changed_when: false
+      failed_when: false
+
+    - name: "Display System Health Check Summary"
+      ansible.builtin.debug:
+        msg:
+          - "======================================================================"
+          - "                     SYSTEM HEALTH CHECK SUMMARY                      "
+          - "======================================================================"
+          - " [{{ 'PASS' if 'Up' in (host_container_status.stdout | default('')) else 'FAIL' }}] 1. Host Container ({{ container_name }}): {{ 'Running' if 'Up' in (host_container_status.stdout | default('')) else 'Stopped/Missing' }}"
+          - " [{{ 'PASS' if (qemu_version.rc | default(-1)) == 0 else 'FAIL' }}] 2. QEMU Tooling: {{ (qemu_version.stdout_lines | default([])) | first | default('Not installed or Skipped') }}"
+          - " [{{ 'PASS' if 'Running' in (lima_vm_status.stdout | default('')) else 'FAIL' }}] 3. Lima VM ({{ lima_vm_name }}): {{ 'Running' if 'Running' in (lima_vm_status.stdout | default('')) else 'Stopped' }}"
+          - " [{{ 'PASS' if '1366:' in (guest_lsusb.stdout | default('')) else 'WARN' }}] 4. SEGGER USB Hardware: {{ 'Detected (1366:1055)' if '1366:' in (guest_lsusb.stdout | default('')) else 'Not Detected in lsusb' }}"
+          - " [{{ 'PASS' if '/dev/ttyACM0' in (guest_tty_devices.stdout | default('')) else 'FAIL' }}] 5. Guest TTY Devices: {{ 'ACM Nodes Active' if '/dev/ttyACM0' in (guest_tty_devices.stdout | default('')) else 'Missing /dev/ttyACM0' }}"
+          - " [{{ 'PASS' if 'actions-runner' in (guest_runner_containers.stdout | default('')) else 'FAIL' }}] 6. Runner Containers: {{ ((guest_runner_containers.stdout_lines | default([])) | select('search', 'actions-runner') | list | length) }} active"
+          - " [{{ 'PASS' if github_api_status.results is defined else 'SKIP' }}] 7. GitHub API: {{ 'Registered' if github_api_status.results is defined else 'Skipped' }}"
+          - "======================================================================"
+      when: not ansible_check_mode
+
+    - name: "Display Serial Access Sweep Per Runner"
+      ansible.builtin.debug:
+        msg:
+          - "----------------------------------------------------------------------"
+          - "RUNNER: {{ item.item.name }}"
+          - "REPO:   {{ item.item.owner }}/{{ item.item.repo }}"
+          - "----------------------------------------------------------------------"
+          - "{{ item.stdout_lines | default(['No check output']) }}"
+      loop: "{{ runner_permissions_sweep.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when:
+        - runner_permissions_sweep.results is defined
+        - not ansible_check_mode
+

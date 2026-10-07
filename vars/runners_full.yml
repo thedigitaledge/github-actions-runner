@@ -1,0 +1,44 @@
+# vars/runners.yml
+github_runners:
+  - owner: "thedigitaledge"
+    repo: "tde-zephyr-smartmesh-ip"
+    name: "bender-smartmesh-ip-pca10095-runner"
+    labels: "self-hosted,Linux,x64,usb,nrf5340dk,pca10095,iks01a2"
+    token: "{{ vault_runner_token_zephyr | default('') }}"
+
+  - owner: "thedigitaledge"
+    repo: "tde-mote-firmware"
+    name: "bender-mote-firmware-pca10095-runner"
+    labels: "self-hosted,Linux,x64,usb,nrf5340dk,pca10095,iks01a2"
+    token: "{{ vault_runner_token_mote | default('') }}"
+
+  - owner: "thedigitaledge"
+    repo: "tde-zephyr-lua"
+    name: "bender-zephyr-lua-pca10095-runner"
+    labels: "self-hosted,Linux,x64,usb,nrf5340dk,pca10095,iks01a2"
+    token: "{{ vault_runner_token_lua | default('') }}"
+
+  - owner: "thedigitaledge"
+    repo: "tde-imx7-zephyr"
+    name: "bender-imx7-zephyr-runner"
+    labels: "self-hosted,Linux,x64,usb"
+    token: "{{ vault_runner_token_imx7_zephyr | default('') }}"
+
+  - owner: "thedigitaledge"
+    repo: "tde-imx7-yocto"
+    name: "bender-imx7-yocto-runner"
+    labels: "self-hosted,Linux,x64,usb"
+    token: "{{ vault_runner_token_imx7_yocto | default('') }}"
+
+  - owner: "thedigitaledge"
+    repo: "tde-manager-firmware"
+    name: "bender-manager-firmware-pca10095-runner"
+    labels: "self-hosted,Linux,x64,usb"
+    token: "{{ vault_runner_token_manager | default('') }}"
+
+  - owner: "thedigitaledge"
+    repo: "zephyr-zyx-modem"
+    name: "bender-zephyr-zyx-modem-pca10095"
+    labels: "self-hosted,Linux,x64,usb,nrf5340dk,pca10095"
+    token: "{{ vault_runner_token_manager | default('') }}"
+

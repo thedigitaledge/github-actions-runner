@@ -1,0 +1,22 @@
+# vars/runners.yml
+github_runners:
+  - owner: "thedigitaledge"
+    repo: "tde-zephyr-smartmesh-ip"
+    name: "bender-smartmesh-ip-pca10095-runner"
+    labels: "self-hosted,Linux,x64,usb,nrf5340dk,pca10095,iks01a2"
+    devices:
+      - "/dev/ttyACM0"
+      - "/dev/ttyACM1"
+      - "/dev/ttyACM2"
+    token: "{{ vault_runner_token_zephyr | default('') }}"
+
+  - owner: "thedigitaledge"
+    repo: "tde-mote-firmware"
+    name: "bender-mote-firmware-pca10095-runner"
+    labels: "self-hosted,Linux,x64,usb,nrf5340dk,pca10095,iks01a2"
+    devices:
+      - "/dev/ttyACM0"
+      - "/dev/ttyACM1"
+      - "/dev/ttyACM2"
+    token: "{{ vault_runner_token_mote | default('') }}"
+
