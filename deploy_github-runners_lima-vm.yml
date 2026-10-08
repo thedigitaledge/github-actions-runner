@@ -1,4 +1,7 @@
 ---
+# ==============================================================================
+# PLAYBOOK: Deploy Containerized Lima KVM VM and GitHub Actions Runners
+# ==============================================================================
 - name: Deploy Containerized Lima KVM VM and GitHub Actions Runners
   hosts: localhost
   connection: local
@@ -27,16 +30,28 @@
       {% endif %}
 
   tasks:
-    - name: Validate required variables are present
+    # --------------------------------------------------------------------------
+    # TASK 1: Input Validation
+    # Validate that required runner and secret vault variables are set before proceeding.
+    # --------------------------------------------------------------------------
+    - name: "[Task 1] Validate required variables are present"
       ansible.builtin.assert:
         that:
           - github_runners is defined and github_runners | length > 0
           - github_pat is defined or (github_runners[0].token is defined)
         fail_msg: "Ensure vars/vault.yml and vars/runners.yml are properly configured with github_runners and github_pat."
 
-    - name: Execute Deployment Block
+    # --------------------------------------------------------------------------
+    # TASK 2: Main Deployment Block
+    # Contains the primary provisioning sequence for directories, VM container, and runners.
+    # --------------------------------------------------------------------------
+    - name: "[Task 2] Execute Deployment Block"
       block:
-        - name: Ensure required host directories exist
+        # ----------------------------------------------------------------------
+        # TASK 3: Host Directory Structure Provisioning
+        # Ensure configuration and state directories exist on the host user account.
+        # ----------------------------------------------------------------------
+        - name: "[Task 3] Ensure required host directories exist"
           ansible.builtin.file:
             path: "{{ item }}"
             state: directory
@@ -47,7 +62,11 @@
             - "{{ user_home }}/.ssh/config.d"
             - "{{ user_home }}/.lima"
 
-        - name: Ensure SSH config includes config.d directory
+        # ----------------------------------------------------------------------
+        # TASK 4: SSH Configuration Include Rule
+        # Ensure ~/.ssh/config includes modular config files from ~/.ssh/config.d/
+        # ----------------------------------------------------------------------
+        - name: "[Task 4] Ensure SSH config includes config.d directory"
           ansible.builtin.lineinfile:
             path: "{{ user_home }}/.ssh/config"
             line: "Include ~/.ssh/config.d/*"
@@ -55,53 +74,74 @@
             mode: '0600'
             insertbefore: BOF
 
-        - name: Write Containerfile for fedora-minimal Lima runner image
+        # ----------------------------------------------------------------------
+        # TASK 5: Host Lima Engine Containerfile Definition
+        # Write Containerfile to build the Fedora-minimal container image housing Lima.
+        # ----------------------------------------------------------------------
+        - name: "[Task 5] Write Containerfile for fedora-minimal Lima runner image"
           ansible.builtin.copy:
-              dest: "{{ user_home }}/.config/lima/Containerfile"
-              mode: '0644'
-              content: |
-                FROM registry.fedoraproject.org/fedora-minimal:latest
-                RUN microdnf install -y \
-                    qemu-kvm \
-                    qemu-system-x86 \
-                    qemu-img \
-                    openssh-clients \
-                    shadow-utils \
-                    ca-certificates \
-                    tar \
-                    gzip \
-                    curl \
-                    && microdnf clean all \
-                    && LIMA_VER=$(curl -s https://api.github.com/repos/lima-vm/lima/releases/latest | grep '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/' || echo "1.0.0") \
-                    && curl -fsSL "https://github.com/lima-vm/lima/releases/download/v${LIMA_VER}/lima-${LIMA_VER}-Linux-x86_64.tar.gz" | tar -C /usr/local -xzf - \
-                    && useradd -m -u 1000 -s /bin/bash lima
-                ENTRYPOINT ["sleep", "infinity"]
-        - name: Build lightweight fedora-minimal Podman image on host
+            dest: "{{ user_home }}/.config/lima/Containerfile"
+            mode: '0644'
+            content: |
+              FROM registry.fedoraproject.org/fedora-minimal:latest
+              RUN microdnf install -y \
+                  qemu-kvm \
+                  qemu-system-x86 \
+                  qemu-img \
+                  openssh-clients \
+                  shadow-utils \
+                  ca-certificates \
+                  tar \
+                  gzip \
+                  curl \
+                  && microdnf clean all \
+                  && LIMA_VER=$(curl -s https://api.github.com/repos/lima-vm/lima/releases/latest | grep '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/' || echo "1.0.0") \
+                  && curl -fsSL "https://github.com/lima-vm/lima/releases/download/v${LIMA_VER}/lima-${LIMA_VER}-Linux-x86_64.tar.gz" | tar -C /usr/local -xzf - \
+                  && useradd -m -u 1000 -s /bin/bash lima
+              ENTRYPOINT ["sleep", "infinity"]
+
+        # ----------------------------------------------------------------------
+        # TASK 6: Host Image Build
+        # Build the host Podman container image containing QEMU and Lima binaries.
+        # ----------------------------------------------------------------------
+        - name: "[Task 6] Build lightweight fedora-minimal Podman image on host"
           ansible.builtin.command:
             cmd: "{{ podman_bin }} build --network host -t {{ image_tag }} -f {{ user_home }}/.config/lima/Containerfile {{ user_home }}/.config/lima"
           changed_when: true
 
-        - name: Stop and remove existing Lima VM and container if recreate_vm is true
+        # ----------------------------------------------------------------------
+        # TASK 7 & 8: Forced VM Container Re-creation Block
+        # Stop and remove existing VM and container when recreate_vm is true.
+        # ----------------------------------------------------------------------
+        - name: "[Task 7 & 8] Stop and remove existing Lima VM and container if recreate_vm is true"
           block:
-            - name: Stop containerized Lima VM if running
+            - name: "[Task 7] Stop containerized Lima VM if running"
               ansible.builtin.command:
                 cmd: "{{ podman_bin }} exec -u lima {{ container_name }} limactl delete -f {{ lima_vm_name }}"
               failed_when: false
 
-            - name: Remove existing Podman container
+            - name: "[Task 8] Remove existing Podman container"
               ansible.builtin.command:
                 cmd: "{{ podman_bin }} rm -f {{ container_name }}"
               failed_when: false
           when: (recreate_vm | default(false)) | bool
 
-        - name: Check if Podman container exists and is running
+        # ----------------------------------------------------------------------
+        # TASK 9: Inspect Host Podman Container Status
+        # Check if the lima-vm-container is currently running on the host system.
+        # ----------------------------------------------------------------------
+        - name: "[Task 9] Check if Podman container exists and is running"
           ansible.builtin.command:
             cmd: "{{ podman_bin }} inspect -f '{{ '{{' }}.State.Running{{ '}}' }}' {{ container_name }}"
           register: container_running
           failed_when: false
           changed_when: false
 
-        - name: Launch Podman container with KVM and USB passthrough
+        # ----------------------------------------------------------------------
+        # TASK 10: Host Podman Container Launch
+        # Run host container with KVM virtualization and USB bus passthrough.
+        # ----------------------------------------------------------------------
+        - name: "[Task 10] Launch Podman container with KVM and USB passthrough"
           ansible.builtin.command:
             cmd: >
               {{ podman_bin }} run -d
@@ -118,7 +158,11 @@
               {{ image_tag }}
           when: container_running.stdout != "true"
 
-        - name: Write Lima VM configuration file
+        # ----------------------------------------------------------------------
+        # TASK 11: Lima Guest VM Configuration File Definition
+        # Write cloud-init and QEMU hardware configuration for the Ubuntu guest VM.
+        # ----------------------------------------------------------------------
+        - name: "[Task 11] Write Lima VM configuration file"
           ansible.builtin.copy:
             dest: "{{ user_home }}/.config/lima/{{ lima_vm_name }}.yaml"
             mode: '0644'
@@ -151,14 +195,22 @@
 
                     usermod -aG dialout,plugdev ${LIMA_CIDATA_USER:-lima}
 
-        - name: Check if Lima VM is running inside Podman container
+        # ----------------------------------------------------------------------
+        # TASK 12: Inspect Guest Lima VM Running Status
+        # Query limactl list to determine if the github-runner VM is already active.
+        # ----------------------------------------------------------------------
+        - name: "[Task 12] Check if Lima VM is running inside Podman container"
           ansible.builtin.command:
             cmd: "{{ podman_bin }} exec -u lima {{ container_name }} limactl list {{ lima_vm_name }} --format '{{ '{{' }}.Status{{ '}}' }}'"
           register: lima_status
           failed_when: false
           changed_when: false
 
-        - name: Start Lima VM inside Podman container with QEMU USB passthrough
+        # ----------------------------------------------------------------------
+        # TASK 13: Start Lima KVM VM with SEGGER USB Passthrough
+        # Boot the guest Ubuntu VM using QEMU with vendor ID 0x1366 USB passthrough.
+        # ----------------------------------------------------------------------
+        - name: "[Task 13] Start Lima VM inside Podman container with QEMU USB passthrough"
           ansible.builtin.command:
             cmd: >
               {{ podman_bin }} exec -u lima
@@ -166,7 +218,11 @@
               {{ container_name }} limactl start --name={{ lima_vm_name }} {{ user_home }}/.config/lima/{{ lima_vm_name }}.yaml
           when: "'Running' not in lima_status.stdout"
 
-        - name: Ensure cdc_acm driver and udev rules are active in VM
+        # ----------------------------------------------------------------------
+        # TASK 14: Ensure Serial Kernel Drivers & Rules in Guest VM
+        # Reload cdc_acm kernel module and trigger udev rules inside the guest VM.
+        # ----------------------------------------------------------------------
+        - name: "[Task 14] Ensure cdc_acm driver and udev rules are active in VM"
           ansible.builtin.command:
             cmd: >
               {{ podman_bin }} exec -u lima {{ container_name }}
@@ -174,7 +230,23 @@
               "modprobe cdc_acm && udevadm control --reload-rules && udevadm trigger"
           changed_when: false
 
-        - name: Export Lima SSH config to host for Cockpit access
+        # ----------------------------------------------------------------------
+        # TASK 15: Enable Podman Systemd Socket in Guest VM (NEW FEATURE)
+        # Enable and start podman.socket in the Lima VM guest OS to support
+        # container-in-container workflow steps (the 'container:' keyword).
+        # ----------------------------------------------------------------------
+        - name: "[Task 15] Ensure Podman socket service is enabled and active in Lima VM"
+          ansible.builtin.command:
+            cmd: >
+              {{ podman_bin }} exec -u lima {{ container_name }}
+              limactl shell {{ lima_vm_name }} sudo systemctl enable --now podman.socket
+          changed_when: false
+
+        # ----------------------------------------------------------------------
+        # TASK 16: Export VM SSH Config for Cockpit Management
+        # Generate SSH config snippet on the host so Cockpit can reach the guest VM.
+        # ----------------------------------------------------------------------
+        - name: "[Task 16] Export Lima SSH config to host for Cockpit access"
           ansible.builtin.shell:
             cmd: >
               {{ podman_bin }} exec -u lima {{ container_name }}
@@ -183,15 +255,20 @@
               > {{ user_home }}/.ssh/config.d/lima-{{ lima_vm_name }}.conf
           changed_when: false
 
-        - name: Ensure correct file permissions on exported SSH config
+        # ----------------------------------------------------------------------
+        # TASK 17: Set Permissions on Exported SSH Config
+        # Ensure strict 0600 file permissions on generated SSH config snippet.
+        # ----------------------------------------------------------------------
+        - name: "[Task 17] Ensure correct file permissions on exported SSH config"
           ansible.builtin.file:
             path: "{{ user_home }}/.ssh/config.d/lima-{{ lima_vm_name }}.conf"
             mode: '0600'
 
         # ----------------------------------------------------------------------
-        # 1. Inspect existing runner containers to detect device changes (drift)
+        # TASK 18: Detect Device Drift on Existing Runner Containers
+        # Inspect existing runner container device mappings inside the guest VM.
         # ----------------------------------------------------------------------
-        - name: Inspect device mappings of existing runner containers
+        - name: "[Task 18] Inspect device mappings of existing runner containers"
           ansible.builtin.command:
             cmd: >
               {{ podman_bin }} exec -u lima {{ container_name }}
@@ -205,9 +282,10 @@
           tags: [runners]
 
         # ----------------------------------------------------------------------
-        # 2. Automatically remove stale, drifted, or specifically targeted runners
+        # TASK 19: Remove Drifted or Targeted Runner Containers
+        # Force removal of runner containers if device drift occurs or recreation requested.
         # ----------------------------------------------------------------------
-        - name: Remove runner containers if devices drifted or targeted for recreation
+        - name: "[Task 19] Remove runner containers if devices drifted or targeted for recreation"
           ansible.builtin.command:
             cmd: >
               {{ podman_bin }} exec -u lima {{ container_name }}
@@ -227,9 +305,10 @@
           tags: [runners]
 
         # ----------------------------------------------------------------------
-        # 3. Refresh list of active runner containers inside the Lima VM
+        # TASK 20: Refresh Active Guest Runner Container List
+        # Re-query podman ps inside the guest VM to verify active runner containers.
         # ----------------------------------------------------------------------
-        - name: Re-inspect active runner containers inside Lima VM
+        - name: "[Task 20] Re-inspect active runner containers inside Lima VM"
           ansible.builtin.command:
             cmd: "{{ podman_bin }} exec -u lima {{ container_name }} limactl shell {{ lima_vm_name }} sudo podman ps -a --format '{{ '{{' }}.Names{{ '}}' }}'"
           register: existing_containers
@@ -237,9 +316,10 @@
           tags: [runners]
 
         # ----------------------------------------------------------------------
-        # 4. Fetch dynamic registration tokens for missing/re-created runners
+        # TASK 21: Acquire Registration Tokens via GitHub API
+        # Post request to GitHub REST API for short-lived runner registration tokens.
         # ----------------------------------------------------------------------
-        - name: Fetch dynamic registration token for missing runners
+        - name: "[Task 21] Fetch dynamic registration token for missing runners"
           ansible.builtin.uri:
             url: "https://api.github.com/repos/{{ item.owner }}/{{ item.repo }}/actions/runners/registration-token"
             method: POST
@@ -253,13 +333,14 @@
             - github_pat is defined and github_pat | length > 0
             - item.name not in existing_containers.stdout_lines
           register: registration_tokens
-          # no_log: true
           tags: [runners]
 
         # ----------------------------------------------------------------------
-        # 5. Launch and register new runner containers with dynamic devices
+        # TASK 22: Launch & Register Runner Containers with Podman Socket Passthrough
+        # Deploy unprivileged runner containers with dynamic CDC-ACM USB access (major 166)
+        # and Podman socket passthrough (/var/run/docker.sock) for workflow 'container:' support.
         # ----------------------------------------------------------------------
-        - name: Launch and register new runner containers inside Lima VM
+        - name: "[Task 22] Launch and register new runner containers inside Lima VM"
           ansible.builtin.command:
             cmd: >
               {{ podman_bin }} exec -u lima {{ container_name }}
@@ -268,6 +349,8 @@
               --restart=always
               --device-cgroup-rule='c 166:* rmw'
               -v /dev:/dev
+              -v /run/podman/podman.sock:/var/run/docker.sock
+              -e DOCKER_HOST=unix:///var/run/docker.sock
               --group-add dialout
               ghcr.io/actions/actions-runner:latest
               bash -c "./config.sh --url 'https://github.com/{{ item.item.owner }}/{{ item.item.repo }}' --token '{{ item.json.token if (item.json is defined and item.json.token is defined) else item.item.token }}' --name '{{ item.item.name }}' --labels '{{ item.item.labels }}' --unattended --replace && ./run.sh"
@@ -276,19 +359,23 @@
             - item.skipped is not defined or not item.skipped
           loop_control:
             label: "{{ item.item.name }}"
-          # no_log: true
           tags: [runners]
 
         # ----------------------------------------------------------------------
-        # 6. Fallback launcher for static runner tokens in runners.yml
+        # TASK 23: Fallback Runner Launcher for Static Tokens
+        # Launch runner containers using static tokens supplied directly in runners.yml.
         # ----------------------------------------------------------------------
-        - name: Fallback launch runner containers if token provided directly in runners.yml
+        - name: "[Task 23] Fallback launch runner containers if token provided directly in runners.yml"
           ansible.builtin.command:
             cmd: >
               {{ podman_bin }} exec -u lima {{ container_name }}
               limactl shell {{ lima_vm_name }} sudo podman run -d
               --name {{ item.name }}
               --restart=always
+              --device-cgroup-rule='c 166:* rmw'
+              -v /dev:/dev
+              -v /run/podman/podman.sock:/var/run/docker.sock
+              -e DOCKER_HOST=unix:///var/run/docker.sock
               {% if item.devices is defined and item.devices is iterable and item.devices | length > 0 %}{% for dev in item.devices %}--device {{ dev }} {% endfor %}{% endif %}
               --group-add dialout
               ghcr.io/actions/actions-runner:latest
@@ -300,10 +387,13 @@
             - item.token is defined
           loop_control:
             label: "{{ item.name }}"
-          # no_log: true
           tags: [runners]
 
-        - name: Create systemd user service for containerized Lima VM engine
+        # ----------------------------------------------------------------------
+        # TASK 24: Define Host Systemd User Unit File
+        # Write systemd user service unit file for automated Lima VM engine startup.
+        # ----------------------------------------------------------------------
+        - name: "[Task 24] Create systemd user service for containerized Lima VM engine"
           ansible.builtin.copy:
             dest: "{{ user_home }}/.config/systemd/user/lima-vm-container.service"
             mode: '0644'
@@ -324,7 +414,11 @@
               [Install]
               WantedBy=default.target
 
-        - name: Enable and start systemd user service on host
+        # ----------------------------------------------------------------------
+        # TASK 25: Enable & Start Host Systemd User Unit
+        # Enable and activate lima-vm-container.service under user systemd instance.
+        # ----------------------------------------------------------------------
+        - name: "[Task 25] Enable and start systemd user service on host"
           ansible.builtin.systemd_service:
             name: lima-vm-container.service
             scope: user
@@ -336,11 +430,19 @@
             XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.user_uid | default('1000') }}"
 
       rescue:
-        - name: Handle Failure - Print failure message
+        # ----------------------------------------------------------------------
+        # TASK 26: Rescue Handler Failure Diagnostic Output
+        # Print failure notice when a task inside the deployment block fails.
+        # ----------------------------------------------------------------------
+        - name: "[Task 26] Handle Failure - Print failure message"
           ansible.builtin.debug:
             msg: "A critical task failed during deployment. Proceeding with cleanup..."
 
-        - name: Cleanup - Stop systemd user service
+        # ----------------------------------------------------------------------
+        # TASK 27: Rescue Cleanup Stop Systemd Service
+        # Stop host systemd user service during deployment failure cleanup.
+        # ----------------------------------------------------------------------
+        - name: "[Task 27] Cleanup - Stop systemd user service"
           ansible.builtin.systemd_service:
             name: lima-vm-container.service
             scope: user
@@ -349,17 +451,20 @@
             daemon_reload: true
           failed_when: false
 
-        #- name: Cleanup - Force remove Podman container
-        # ansible.builtin.command:
-        #    cmd: "{{ podman_bin }} rm -f {{ container_name }}"
-        #  failed_when: false
-
-        - name: Cleanup - Remove stale Lima SSH config
+        # ----------------------------------------------------------------------
+        # TASK 28: Rescue Cleanup Remove Stale SSH Config
+        # Remove generated SSH configuration snippet during cleanup.
+        # ----------------------------------------------------------------------
+        - name: "[Task 28] Cleanup - Remove stale Lima SSH config"
           ansible.builtin.file:
             path: "{{ user_home }}/.ssh/config.d/lima-{{ lima_vm_name }}.conf"
             state: absent
 
-        - name: Trigger Ansible Failure
+        # ----------------------------------------------------------------------
+        # TASK 29: Trigger Explicit Ansible Playbook Failure
+        # Raise playbook failure after rescue cleanup sequence completes.
+        # ----------------------------------------------------------------------
+        - name: "[Task 29] Trigger Ansible Failure"
           ansible.builtin.fail:
             msg: "Deployment failed. Cleanup completed successfully. Check playbook logs for details."
 
