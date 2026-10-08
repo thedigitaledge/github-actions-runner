@@ -1,0 +1,9 @@
+[Unit]
+Description=Self-Healing Watchdog Service for GitHub Runners Infrastructure
+After=network-online.target lima-vm-container.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory={{ playbook_dir }}
+ExecStart={{ playbook_dir }}/self_healing_check.sh

@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${SCRIPT_DIR}/.venv"
 VAULT_PASS_FILE="${SCRIPT_DIR}/.secrets/ansible_vault_pass"
 VARS_DIR="${SCRIPT_DIR}/vars"
+REQUIREMENTS_FILE="${SCRIPT_DIR}/requirements.yml"
 
 # Pipeline playbooks in execution order
 PLAYBOOKS=(
@@ -96,8 +97,8 @@ elif ! command -v ansible-playbook &>/dev/null; then
 fi
 
 echo "==> Installing Ansible Galaxy dependencies..."
-if [ -f "${SCRIPT_DIR}/requirements.yml" ]; then
-    ansible-galaxy collection install -r "${SCRIPT_DIR}/requirements.yml" --upgrade --quiet
+if [ -f "${REQUIREMENTS_FILE}" ]; then
+    ansible-galaxy collection install -r "${REQUIREMENTS_FILE}" --upgrade > /dev/null
 fi
 
 echo "==> Verifying configuration and secret files..."

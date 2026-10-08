@@ -1,0 +1,46 @@
+vmType: "qemu"
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img"
+    arch: "x86_64"
+cpus: 4
+memory: "6GiB"
+disk: "40GiB"
+mounts: []
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux
+      apt-get update
+      apt-get install -y podman podman-docker linux-modules-extra-$(uname -r) udev usbutils ca-certificates curl gnupg cockpit-bridge cockpit-system ccache uhubctl
+      mkdir -p /var/cache/ccache && chmod 777 /var/cache/ccache
+
+      modprobe cdc_acm
+      echo "cdc_acm" > /etc/modules-load.d/cdc_acm.conf
+
+      cat << 'EOF' > /etc/udev/rules.d/99-ttyacm.rules
+      KERNEL=="ttyACM*", MODE="0666"
+      EOF
+
+      curl -fsSL https://www.segger.com/downloads/jlink/99-jlink.rules -o /etc/udev/rules.d/99-jlink.rules
+
+      cat << 'EOF' > /usr/local/bin/segger-hotplug-recovery.sh
+      #!/bin/bash
+      logger -t segger-hotplug "SEGGER J-Link probe hot-plug detected. Refreshing udev and recovering offline runners..."
+      udevadm control --reload-rules && udevadm trigger
+      for container in $(podman ps -a --filter "ancestor=ghcr.io/actions/actions-runner:latest" --format "{{.Names}}"); do
+        if ! podman ps --format "{{.Names}}" | grep -q "^${container}$"; then
+          logger -t segger-hotplug "Restarting offline runner container: ${container}"
+          podman restart "${container}" || true
+        fi
+      done
+      EOF
+      chmod +x /usr/local/bin/segger-hotplug-recovery.sh
+
+      cat << 'EOF' > /etc/udev/rules.d/99-segger-hotplug.rules
+      ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="1366", ATTR{idProduct}=="1055", RUN+="/usr/local/bin/segger-hotplug-recovery.sh"
+      EOF
+
+      udevadm control --reload-rules && udevadm trigger
+
+      usermod -aG dialout,plugdev ${LIMA_CIDATA_USER:-lima}

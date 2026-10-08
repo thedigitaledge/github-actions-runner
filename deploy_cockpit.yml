@@ -1,7 +1,7 @@
+---
 # ==============================================================================
 # PLAYBOOK: deploy_cockpit.yml
 # ==============================================================================
----
 - name: Deploy Cockpit Web Console Container
   hosts: localhost
   connection: local
@@ -34,69 +34,28 @@
         - "{{ user_home }}/.config/cockpit/machines.d"
 
     - name: Register host-system target in Cockpit machines definition
-      ansible.builtin.copy:
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/assets/10-host-system.json.j2"
         dest: "{{ user_home }}/.config/cockpit/machines.d/10-host-system.json"
         mode: '0644'
-        content: |
-          {
-            "host-system": {
-              "address": "host.containers.internal",
-              "visible": true,
-              "user": "{{ lookup('ansible.builtin.env', 'USER') }}"
-            }
-          }
 
     - name: Register lima-github-runner target in Cockpit machines definition
       ansible.builtin.copy:
+        src: "{{ playbook_dir }}/assets/20-lima-github-runner.json"
         dest: "{{ user_home }}/.config/cockpit/machines.d/20-lima-github-runner.json"
         mode: '0644'
-        content: |
-          {
-            "lima-github-runner": {
-              "address": "lima-github-runner",
-              "visible": true,
-              "user": "lima"
-            }
-          }
 
     - name: Enable Multi-Host switcher in Cockpit configuration
       ansible.builtin.copy:
+        src: "{{ playbook_dir }}/assets/cockpit.conf"
         dest: "{{ user_home }}/.config/cockpit/cockpit.conf"
         mode: '0644'
-        content: |
-          [WebService]
-          AllowMultiHost=yes
 
     - name: Create systemd user service for Cockpit WS container
       ansible.builtin.copy:
+        src: "{{ playbook_dir }}/assets/cockpit-ws.service"
         dest: "{{ user_home }}/.config/systemd/user/cockpit-ws.service"
         mode: '0644'
-        content: |
-          [Unit]
-          Description=Cockpit Web Console Container
-          After=network-online.target
-          Wants=network-online.target
-
-          [Service]
-          Type=exec
-          Restart=always
-          ExecStartPre=-/usr/bin/podman rm -f cockpit-ws
-          ExecStart=/usr/bin/podman run --name cockpit-ws \
-            --rm \
-            --security-opt label=disable \
-            --network host \
-            -v /etc/os-release:/etc/os-release:ro \
-            -v /etc/issue:/etc/issue:ro \
-            -v %h:%h:ro \
-            -v %h/.ssh:/root/.ssh:ro \
-            -v %h/.ssh:/container/.ssh:ro \
-            -v %h/.lima:%h/.lima:ro \
-            -v %h/.config/cockpit:/etc/cockpit:z \
-            quay.io/cockpit/ws:latest
-          ExecStop=/usr/bin/podman stop cockpit-ws
-
-          [Install]
-          WantedBy=default.target
 
     - name: Enable and start Cockpit systemd user service
       ansible.builtin.systemd_service:
@@ -108,4 +67,3 @@
       failed_when: false
       environment:
         XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.user_uid | default('1000') }}"
-

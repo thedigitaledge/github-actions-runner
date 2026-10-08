@@ -1,0 +1,25 @@
+[Unit]
+Description=Cockpit Web Console Container
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+Restart=always
+ExecStartPre=-/usr/bin/podman rm -f cockpit-ws
+ExecStart=/usr/bin/podman run --name cockpit-ws \
+  --rm \
+  --security-opt label=disable \
+  --network host \
+  -v /etc/os-release:/etc/os-release:ro \
+  -v /etc/issue:/etc/issue:ro \
+  -v %h:%h:ro \
+  -v %h/.ssh:/root/.ssh:ro \
+  -v %h/.ssh:/container/.ssh:ro \
+  -v %h/.lima:%h/.lima:ro \
+  -v %h/.config/cockpit:/etc/cockpit:z \
+  quay.io/cockpit/ws:latest
+ExecStop=/usr/bin/podman stop cockpit-ws
+
+[Install]
+WantedBy=default.target

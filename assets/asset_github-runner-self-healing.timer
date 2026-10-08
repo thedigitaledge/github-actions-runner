@@ -1,0 +1,10 @@
+[Unit]
+Description=Run GitHub Runner Self-Healing Check Every 15 Minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+AccuracySec=1m
+
+[Install]
+WantedBy=timers.target

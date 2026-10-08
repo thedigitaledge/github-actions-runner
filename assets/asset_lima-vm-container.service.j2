@@ -1,0 +1,15 @@
+[Unit]
+Description=Containerized Lima VM Engine for GitHub Runners
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/podman start {{ container_name }}
+ExecStartPost=/usr/bin/podman exec -u lima -e QEMU_SYSTEM_X86_64="qemu-system-x86_64 -device qemu-xhci,id=xhci -device usb-host,vendorid=0x1366" {{ container_name }} limactl start {{ lima_vm_name }}
+ExecStop=/usr/bin/podman exec -u lima {{ container_name }} limactl stop {{ lima_vm_name }}
+ExecStopPost=/usr/bin/podman stop {{ container_name }}
+
+[Install]
+WantedBy=default.target
