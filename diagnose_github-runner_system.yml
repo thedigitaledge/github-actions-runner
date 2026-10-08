@@ -29,6 +29,7 @@
       ansible.builtin.command:
         cmd: "{{ podman_bin }} ps -f name={{ container_name }}"
       register: host_container_status
+      check_mode: false
       changed_when: false
       failed_when: false
 
@@ -36,6 +37,7 @@
       ansible.builtin.command:
         cmd: "{{ podman_bin }} exec -u lima {{ container_name }} qemu-img --version"
       register: qemu_version
+      check_mode: false
       changed_when: false
       failed_when: false
 
@@ -43,6 +45,7 @@
       ansible.builtin.command:
         cmd: "{{ podman_bin }} exec -u lima {{ container_name }} limactl list {{ lima_vm_name }}"
       register: lima_vm_status
+      check_mode: false
       changed_when: false
       failed_when: false
 
@@ -50,13 +53,31 @@
       ansible.builtin.command:
         cmd: "{{ podman_bin }} exec -u lima {{ container_name }} limactl shell {{ lima_vm_name }} -- lsusb"
       register: guest_lsusb
+      check_mode: false
       changed_when: false
       failed_when: false
 
-    - name: "Check TTY ACM Serial Devices inside Guest VM"
+    - name: "Check uhubctl USB Power Control Tool inside Guest VM"
       ansible.builtin.command:
-        cmd: "{{ podman_bin }} exec -u lima {{ container_name }} limactl shell {{ lima_vm_name }} -- sh -c 'ls -la /dev/ttyACM*'"
+        cmd: "{{ podman_bin }} exec -u lima {{ container_name }} limactl shell {{ lima_vm_name }} -- uhubctl --version"
+      register: guest_uhubctl
+      check_mode: false
+      changed_when: false
+      failed_when: false
+
+    - name: "Check Persistent USB Serial by-id Symlinks inside Guest VM"
+      ansible.builtin.command:
+        cmd: "{{ podman_bin }} exec -u lima {{ container_name }} limactl shell {{ lima_vm_name }} -- sh -c 'ls -la /dev/serial/by-id/* 2>/dev/null || ls -la /dev/ttyACM*'"
       register: guest_tty_devices
+      check_mode: false
+      changed_when: false
+      failed_when: false
+
+    - name: "Check SEGGER Hot-Plug Recovery udev Rule inside Guest VM"
+      ansible.builtin.command:
+        cmd: "{{ podman_bin }} exec -u lima {{ container_name }} limactl shell {{ lima_vm_name }} -- test -f /etc/udev/rules.d/99-segger-hotplug.rules"
+      register: guest_hotplug_rule
+      check_mode: false
       changed_when: false
       failed_when: false
 
@@ -64,6 +85,7 @@
       ansible.builtin.command:
         cmd: "{{ podman_bin }} exec -u lima {{ container_name }} limactl shell {{ lima_vm_name }} -- sudo podman ps"
       register: guest_runner_containers
+      check_mode: false
       changed_when: false
       failed_when: false
 
@@ -88,9 +110,24 @@
           '
       loop: "{{ github_runners }}"
       register: runner_permissions_sweep
+      check_mode: false
       changed_when: false
       failed_when: false
       timeout: 30
+
+    - name: "Auto-Recover USB Ports via uhubctl if Serial Ports are Unresponsive"
+      ansible.builtin.command:
+        cmd: >
+          {{ podman_bin }} exec -u lima {{ container_name }}
+          limactl shell {{ lima_vm_name }} --
+          sudo uhubctl -a cycle
+      when:
+        - runner_permissions_sweep.results is defined
+        - "'NOT Writable' in (runner_permissions_sweep.results | map(attribute='stdout') | join(' '))"
+      register: uhubctl_recovery_action
+      check_mode: false
+      changed_when: true
+      failed_when: false
 
     - name: "Query GitHub API Runner Online Status"
       ansible.builtin.uri:
@@ -104,6 +141,7 @@
       loop: "{{ github_runners }}"
       when: github_pat is defined and github_pat | length > 0
       register: github_api_status
+      check_mode: false
       changed_when: false
       failed_when: false
 
@@ -117,11 +155,12 @@
           - " [{{ 'PASS' if (qemu_version.rc | default(-1)) == 0 else 'FAIL' }}] 2. QEMU Tooling: {{ (qemu_version.stdout_lines | default([])) | first | default('Not installed or Skipped') }}"
           - " [{{ 'PASS' if 'Running' in (lima_vm_status.stdout | default('')) else 'FAIL' }}] 3. Lima VM ({{ lima_vm_name }}): {{ 'Running' if 'Running' in (lima_vm_status.stdout | default('')) else 'Stopped' }}"
           - " [{{ 'PASS' if '1366:' in (guest_lsusb.stdout | default('')) else 'WARN' }}] 4. SEGGER USB Hardware: {{ 'Detected (1366:1055)' if '1366:' in (guest_lsusb.stdout | default('')) else 'Not Detected in lsusb' }}"
-          - " [{{ 'PASS' if '/dev/ttyACM0' in (guest_tty_devices.stdout | default('')) else 'FAIL' }}] 5. Guest TTY Devices: {{ 'ACM Nodes Active' if '/dev/ttyACM0' in (guest_tty_devices.stdout | default('')) else 'Missing /dev/ttyACM0' }}"
-          - " [{{ 'PASS' if 'actions-runner' in (guest_runner_containers.stdout | default('')) else 'FAIL' }}] 6. Runner Containers: {{ ((guest_runner_containers.stdout_lines | default([])) | select('search', 'actions-runner') | list | length) }} active"
-          - " [{{ 'PASS' if github_api_status.results is defined else 'SKIP' }}] 7. GitHub API: {{ 'Registered' if github_api_status.results is defined else 'Skipped' }}"
+          - " [{{ 'PASS' if (guest_uhubctl.rc | default(-1)) == 0 else 'WARN' }}] 5. uhubctl USB Control: {{ 'Installed' if (guest_uhubctl.rc | default(-1)) == 0 else 'Not installed' }}"
+          - " [{{ 'PASS' if 'usb-SEGGER' in (guest_tty_devices.stdout | default('')) or 'ttyACM' in (guest_tty_devices.stdout | default('')) else 'FAIL' }}] 6. Guest Serial Mappings: {{ 'by-id / ttyACM active' if ('usb-SEGGER' in (guest_tty_devices.stdout | default('')) or 'ttyACM' in (guest_tty_devices.stdout | default(''))) else 'Missing Serial Devices' }}"
+          - " [{{ 'PASS' if (guest_hotplug_rule.rc | default(-1)) == 0 else 'WARN' }}] 7. udev Hot-Plug Trigger: {{ 'Active (/etc/udev/rules.d/99-segger-hotplug.rules)' if (guest_hotplug_rule.rc | default(-1)) == 0 else 'Missing Rule' }}"
+          - " [{{ 'PASS' if 'actions-runner' in (guest_runner_containers.stdout | default('')) else 'FAIL' }}] 8. Runner Containers: {{ ((guest_runner_containers.stdout_lines | default([])) | select('search', 'actions-runner') | list | length) }} active"
+          - " [{{ 'PASS' if github_api_status.results is defined else 'SKIP' }}] 9. GitHub API: {{ 'Registered' if github_api_status.results is defined else 'Skipped' }}"
           - "======================================================================"
-      when: not ansible_check_mode
 
     - name: "Display Serial Access Sweep Per Runner"
       ansible.builtin.debug:
@@ -134,7 +173,4 @@
       loop: "{{ runner_permissions_sweep.results | default([]) }}"
       loop_control:
         label: "{{ item.item.name }}"
-      when:
-        - runner_permissions_sweep.results is defined
-        - not ansible_check_mode
-
+      when: runner_permissions_sweep.results is defined
