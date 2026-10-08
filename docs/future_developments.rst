@@ -69,20 +69,7 @@ This document outlines recommended roadmap features, resiliency enhancements, bu
 3. BUILD PERFORMANCE & CI OPTIMIZATION
 -------------------------------------------------------------------
 
-3.1 Shared ccache & Zephyr Workspace Volume Caching
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-* **Objective**: Dramatically reduce embedded compilation times across CI workflow runs.
-* **Rationale**: Embedded toolchains (Zephyr SDK, GCC ARM) frequently re-compile unchanged board abstraction layers.
-* **Implementation**:
-  Mount a persistent shared cache directory into runner containers:
-
-  .. code-block:: yaml
-
-      -v /var/cache/ccache:/gh-runner/.cache/ccache
-
-  Configure ``CCACHE_DIR=/gh-runner/.cache/ccache`` inside the runner environment settings.
-
-3.2 Pre-Baked Base Runner Container Images
+3.1 Pre-Baked Base Runner Container Images
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 * **Objective**: Minimize build setup overhead per job run.
 * **Rationale**: Stock runner images download large embedded toolchains (Zephyr SDK, West, CMake, Ninja) on every build.

@@ -176,7 +176,8 @@
                     #!/bin/bash
                     set -eux
                     apt-get update
-                    apt-get install -y podman podman-docker linux-modules-extra-$(uname -r) udev usbutils ca-certificates curl gnupg cockpit-bridge cockpit-system
+                    apt-get install -y podman podman-docker linux-modules-extra-$(uname -r) udev usbutils ca-certificates curl gnupg cockpit-bridge cockpit-system ccache
+                    mkdir -p /var/cache/ccache && chmod 777 /var/cache/ccache
 
                     modprobe cdc_acm
                     echo "cdc_acm" > /etc/modules-load.d/cdc_acm.conf
@@ -345,7 +346,9 @@
               --device-cgroup-rule='c 166:* rmw'
               -v /dev:/dev
               -v /run/podman/podman.sock:/var/run/docker.sock
+              -v /var/cache/ccache:/gh-runner/.cache/ccache
               -e DOCKER_HOST=unix:///var/run/docker.sock
+              -e CCACHE_DIR=/gh-runner/.cache/ccache
               --group-add dialout
               ghcr.io/actions/actions-runner:latest
               bash -c "./config.sh --url 'https://github.com/{{ item.item.owner }}/{{ item.item.repo }}' --token '{{ item.json.token if (item.json is defined and item.json.token is defined) else item.item.token }}' --name '{{ item.item.name }}' --labels '{{ item.item.labels }}' --unattended --replace --once && ./run.sh"
@@ -370,7 +373,9 @@
               --device-cgroup-rule='c 166:* rmw'
               -v /dev:/dev
               -v /run/podman/podman.sock:/var/run/docker.sock
+              -v /var/cache/ccache:/gh-runner/.cache/ccache
               -e DOCKER_HOST=unix:///var/run/docker.sock
+              -e CCACHE_DIR=/gh-runner/.cache/ccache
               {% if item.devices is defined and item.devices is iterable and item.devices | length > 0 %}{% for dev in item.devices %}--device {{ dev }} {% endfor %}{% endif %}
               --group-add dialout
               ghcr.io/actions/actions-runner:latest
