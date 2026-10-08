@@ -101,8 +101,11 @@ if [ -f "${SCRIPT_DIR}/requirements.yml" ]; then
 fi
 
 echo "==> Verifying configuration and secret files..."
-if [ ! -f "${VAULT_PASS_FILE}" ]; then
-    echo "Error: Vault password file missing at ${VAULT_PASS_FILE}" >&2
+VAULT_PASS_SCRIPT="${SCRIPT_DIR}/.secrets/vault_pass.sh"
+if [ -f "${VAULT_PASS_SCRIPT}" ]; then
+    chmod +x "${VAULT_PASS_SCRIPT}"
+elif [ ! -f "${VAULT_PASS_FILE}" ] && [ -z "${ANSIBLE_VAULT_PASSWORD:-}" ]; then
+    echo "Error: Vault password resolution mechanism missing (ensure .secrets/vault_pass.sh, .secrets/ansible_vault_pass, or ANSIBLE_VAULT_PASSWORD environment variable exists)." >&2
     exit 1
 fi
 

@@ -88,22 +88,3 @@ This document outlines recommended roadmap features, resiliency enhancements, bu
 * **Rationale**: Stock runner images download large embedded toolchains (Zephyr SDK, West, CMake, Ninja) on every build.
 * **Implementation**:
   Maintain a custom base image (``ghcr.io/your-org/embedded-runner-base:latest``) pre-installed with required toolchains and Python dependencies.
-
--------------------------------------------------------------------
-4. SECURITY & ACCESS CONTROL
--------------------------------------------------------------------
-
-4.1 Automated Ephemeral Runner Mode (--once)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-* **Objective**: Guarantee absolute clean-slate isolation for every single CI build.
-* **Rationale**: Prevents build-to-build contamination or stale firmware artifacts.
-* **Implementation**:
-  Register runner containers with the ``--once`` flag and wrap them inside a Podman systemd template unit that automatically restarts a fresh container instance upon exit.
-
-4.2 Vault Password Resolution via Host Keyring / Environment
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-* **Objective**: Remove plaintext vault password files from disk.
-* **Rationale**: Enhances credential security against unprivileged host processes.
-* **Implementation**:
-  Configure ``ansible.cfg`` with ``vault_password_file = .secrets/vault_pass.sh``, where the script retrieves the vault key from GNOME Keyring (``secret-tool``) or environment variables.
-  

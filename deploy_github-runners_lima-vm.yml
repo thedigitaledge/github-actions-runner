@@ -348,7 +348,7 @@
               -e DOCKER_HOST=unix:///var/run/docker.sock
               --group-add dialout
               ghcr.io/actions/actions-runner:latest
-              bash -c "./config.sh --url 'https://github.com/{{ item.item.owner }}/{{ item.item.repo }}' --token '{{ item.json.token if (item.json is defined and item.json.token is defined) else item.item.token }}' --name '{{ item.item.name }}' --labels '{{ item.item.labels }}' --unattended --replace && ./run.sh"
+              bash -c "./config.sh --url 'https://github.com/{{ item.item.owner }}/{{ item.item.repo }}' --token '{{ item.json.token if (item.json is defined and item.json.token is defined) else item.item.token }}' --name '{{ item.item.name }}' --labels '{{ item.item.labels }}' --unattended --replace --once && ./run.sh"
           loop: "{{ registration_tokens.results | default([]) }}"
           when:
             - item.skipped is not defined or not item.skipped
@@ -374,7 +374,7 @@
               {% if item.devices is defined and item.devices is iterable and item.devices | length > 0 %}{% for dev in item.devices %}--device {{ dev }} {% endfor %}{% endif %}
               --group-add dialout
               ghcr.io/actions/actions-runner:latest
-              bash -c "./config.sh --url 'https://github.com/{{ item.owner }}/{{ item.repo }}' --token '{{ item.token }}' --name '{{ item.name }}' --labels '{{ item.labels }}' --unattended --replace && ./run.sh"
+              bash -c "./config.sh --url 'https://github.com/{{ item.owner }}/{{ item.repo }}' --token '{{ item.token }}' --name '{{ item.name }}' --labels '{{ item.labels }}' --unattended --replace --once && ./run.sh"
           loop: "{{ github_runners }}"
           when:
             - (github_pat is not defined or github_pat | length == 0)
