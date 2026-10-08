@@ -15,6 +15,7 @@ PLAYBOOKS=(
 )
 
 ANSIBLE_ARGS=()
+FORCE_UPDATE_DEPS=false
 
 show_help() {
   cat << EOF
@@ -25,6 +26,7 @@ Options:
   -r, --recreate-runners   Force re-creation of GitHub runner containers
   -m, --recreate-vm        Force re-creation of the Lima VM and host container
   -a, --all                Force re-creation of BOTH runners and the Lima VM
+  -u, --update-deps        Force update/re-installation of Python & Galaxy dependencies
   -c, --check, --dry-run   Run Ansible in check mode (preview changes across all playbooks)
   -v, --verbose            Run Ansible in verbose mode (-v)
   -s, --syntax-check       Validate playbook syntax only without executing
@@ -50,6 +52,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     -a|--all)
       ANSIBLE_ARGS+=("-e" "recreate_runners=true" "-e" "recreate_vm=true")
+      shift
+      ;;
+    -u|--update-deps)
+      FORCE_UPDATE_DEPS=true
       shift
       ;;
     -c|--check|--dry-run)
@@ -86,19 +92,55 @@ fi
 # shellcheck source=/dev/null
 source "${VENV_DIR}/bin/activate"
 
-echo "==> Installing Python dependencies..."
-pip install --quiet --upgrade pip
-if [ -f "${SCRIPT_DIR}/pyproject.toml" ]; then
-    pip install --quiet .
-elif [ -f "${SCRIPT_DIR}/requirements.txt" ]; then
-    pip install --quiet -r "${SCRIPT_DIR}/requirements.txt"
-elif ! command -v ansible-playbook &>/dev/null; then
-    pip install --quiet ansible
+# -----------------------------------------------------------------------------
+# OPTIMIZATION 1: Fast Python Dependency Checking
+# -----------------------------------------------------------------------------
+PIP_STAMP="${VENV_DIR}/.pip_installed"
+PYPROJECT_FILE="${SCRIPT_DIR}/pyproject.toml"
+REQ_TXT_FILE="${SCRIPT_DIR}/requirements.txt"
+
+NEEDS_PIP_INSTALL=false
+
+if [ "${FORCE_UPDATE_DEPS}" = true ] || [ ! -f "${PIP_STAMP}" ] || ! command -v ansible-playbook &>/dev/null; then
+  NEEDS_PIP_INSTALL=true
+elif [ -f "${PYPROJECT_FILE}" ] && [ "${PYPROJECT_FILE}" -nt "${PIP_STAMP}" ]; then
+  NEEDS_PIP_INSTALL=true
+elif [ -f "${REQ_TXT_FILE}" ] && [ "${REQ_TXT_FILE}" -nt "${PIP_STAMP}" ]; then
+  NEEDS_PIP_INSTALL=true
 fi
 
-echo "==> Installing Ansible Galaxy dependencies..."
+if [ "${NEEDS_PIP_INSTALL}" = true ]; then
+  echo "==> Installing Python dependencies..."
+  pip install --quiet --upgrade pip
+  if [ -f "${PYPROJECT_FILE}" ]; then
+      pip install --quiet .
+  elif [ -f "${REQ_TXT_FILE}" ]; then
+      pip install --quiet -r "${REQ_TXT_FILE}"
+  else
+      pip install --quiet ansible
+  fi
+  touch "${PIP_STAMP}"
+else
+  echo "==> Python dependencies already satisfied (skipping pip)."
+fi
+
+# -----------------------------------------------------------------------------
+# OPTIMIZATION 2: Fast Galaxy Collection Checking
+# -----------------------------------------------------------------------------
+GALAXY_STAMP="${VENV_DIR}/.galaxy_installed"
+
 if [ -f "${REQUIREMENTS_FILE}" ]; then
-    ansible-galaxy collection install -r "${REQUIREMENTS_FILE}" --upgrade > /dev/null
+  if [ "${FORCE_UPDATE_DEPS}" = true ] || [ ! -f "${GALAXY_STAMP}" ] || [ "${REQUIREMENTS_FILE}" -nt "${GALAXY_STAMP}" ]; then
+    echo "==> Installing Ansible Galaxy dependencies..."
+    if [ "${FORCE_UPDATE_DEPS}" = true ]; then
+      ansible-galaxy collection install -r "${REQUIREMENTS_FILE}" --upgrade > /dev/null
+    else
+      ansible-galaxy collection install -r "${REQUIREMENTS_FILE}" > /dev/null
+    fi
+    touch "${GALAXY_STAMP}"
+  else
+    echo "==> Ansible Galaxy dependencies up-to-date (skipping galaxy install)."
+  fi
 fi
 
 echo "==> Verifying configuration and secret files..."
