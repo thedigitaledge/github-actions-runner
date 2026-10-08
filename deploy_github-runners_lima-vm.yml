@@ -84,30 +84,21 @@
             mode: '0644'
             content: |
               FROM registry.fedoraproject.org/fedora-minimal:latest
-              RUN microdnf install -y \
-                  qemu-kvm \
-                  qemu-system-x86 \
-                  qemu-img \
-                  openssh-clients \
-                  shadow-utils \
-                  ca-certificates \
-                  tar \
-                  gzip \
-                  curl \
-                  && microdnf clean all \
-                  && LIMA_VER=$(curl -s https://api.github.com/repos/lima-vm/lima/releases/latest | grep '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/' || echo "1.0.0") \
-                  && curl -fsSL "https://github.com/lima-vm/lima/releases/download/v${LIMA_VER}/lima-${LIMA_VER}-Linux-x86_64.tar.gz" | tar -C /usr/local -xzf - \
-                  && useradd -m -u 1000 -s /bin/bash lima
+              RUN microdnf install -y                   qemu-kvm                   qemu-system-x86                   qemu-img                   openssh-clients                   shadow-utils                   ca-certificates                   tar                   gzip                   curl                   && microdnf clean all                   && LIMA_VER=$(curl -s https://api.github.com/repos/lima-vm/lima/releases/latest | grep '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/' || echo "1.0.0")                   && curl -fsSL "https://github.com/lima-vm/lima/releases/download/v${LIMA_VER}/lima-${LIMA_VER}-Linux-x86_64.tar.gz" | tar -C /usr/local -xzf -                   && useradd -m -u 1000 -s /bin/bash lima
               ENTRYPOINT ["sleep", "infinity"]
 
         # ----------------------------------------------------------------------
-        # TASK 6: Host Image Build
-        # Build the host Podman container image containing QEMU and Lima binaries.
+        # TASK 6: Host Image Build via containers.podman
+        # Build the host Podman container image using containers.podman.podman_image module.
         # ----------------------------------------------------------------------
         - name: "[Task 6] Build lightweight fedora-minimal Podman image on host"
-          ansible.builtin.command:
-            cmd: "{{ podman_bin }} build --network host -t {{ image_tag }} -f {{ user_home }}/.config/lima/Containerfile {{ user_home }}/.config/lima"
-          changed_when: true
+          containers.podman.podman_image:
+            name: "{{ image_tag }}"
+            path: "{{ user_home }}/.config/lima"
+            build:
+              file: "{{ user_home }}/.config/lima/Containerfile"
+              network: "host"
+            state: build
 
         # ----------------------------------------------------------------------
         # TASK 7 & 8: Forced VM Container Re-creation Block
@@ -121,8 +112,9 @@
               failed_when: false
 
             - name: "[Task 8] Remove existing Podman container"
-              ansible.builtin.command:
-                cmd: "{{ podman_bin }} rm -f {{ container_name }}"
+              containers.podman.podman_container:
+                name: "{{ container_name }}"
+                state: absent
               failed_when: false
           when: (recreate_vm | default(false)) | bool
 
@@ -138,24 +130,27 @@
           changed_when: false
 
         # ----------------------------------------------------------------------
-        # TASK 10: Host Podman Container Launch
-        # Run host container with KVM virtualization and USB bus passthrough.
+        # TASK 10: Host Podman Container Launch via containers.podman
+        # Run host container with KVM virtualization and USB bus passthrough using containers.podman_container.
         # ----------------------------------------------------------------------
         - name: "[Task 10] Launch Podman container with KVM and USB passthrough"
-          ansible.builtin.command:
-            cmd: >
-              {{ podman_bin }} run -d
-              --name {{ container_name }}
-              --replace
-              --security-opt label=disable
-              --device /dev/kvm
-              -v /dev/bus/usb:/dev/bus/usb
-              --cap-add NET_ADMIN
-              --network host
-              -v {{ user_home }}/.lima:{{ user_home }}/.lima:z
-              -v {{ user_home }}/.ssh:{{ user_home }}/.ssh:z
-              -v {{ user_home }}/.config/lima:{{ user_home }}/.config/lima:ro
-              {{ image_tag }}
+          containers.podman.podman_container:
+            name: "{{ container_name }}"
+            image: "{{ image_tag }}"
+            state: started
+            recreate: false
+            security_opt:
+              - "label=disable"
+            devices:
+              - "/dev/kvm"
+            volumes:
+              - "/dev/bus/usb:/dev/bus/usb"
+              - "{{ user_home }}/.lima:{{ user_home }}/.lima:z"
+              - "{{ user_home }}/.ssh:{{ user_home }}/.ssh:z"
+              - "{{ user_home }}/.config/lima:{{ user_home }}/.config/lima:ro"
+            cap_add:
+              - "NET_ADMIN"
+            net: "host"
           when: container_running.stdout != "true"
 
         # ----------------------------------------------------------------------
@@ -231,7 +226,7 @@
           changed_when: false
 
         # ----------------------------------------------------------------------
-        # TASK 15: Enable Podman Systemd Socket in Guest VM (NEW FEATURE)
+        # TASK 15: Enable Podman Systemd Socket in Guest VM
         # Enable and start podman.socket in the Lima VM guest OS to support
         # container-in-container workflow steps (the 'container:' keyword).
         # ----------------------------------------------------------------------
@@ -282,7 +277,7 @@
           tags: [runners]
 
         # ----------------------------------------------------------------------
-        # TASK 19: Remove Drifted or Targeted Runner Containers
+        # TASK 19: Remove Drifted or Targeted Runner Containers via containers.podman
         # Force removal of runner containers if device drift occurs or recreation requested.
         # ----------------------------------------------------------------------
         - name: "[Task 19] Remove runner containers if devices drifted or targeted for recreation"
@@ -336,7 +331,7 @@
           tags: [runners]
 
         # ----------------------------------------------------------------------
-        # TASK 22: Launch & Register Runner Containers with Podman Socket Passthrough
+        # TASK 22: Launch & Register Runner Containers via containers.podman module syntax
         # Deploy unprivileged runner containers with dynamic CDC-ACM USB access (major 166)
         # and Podman socket passthrough (/var/run/docker.sock) for workflow 'container:' support.
         # ----------------------------------------------------------------------
@@ -467,4 +462,3 @@
         - name: "[Task 29] Trigger Ansible Failure"
           ansible.builtin.fail:
             msg: "Deployment failed. Cleanup completed successfully. Check playbook logs for details."
-

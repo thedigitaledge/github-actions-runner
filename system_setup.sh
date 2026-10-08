@@ -85,7 +85,7 @@ fi
 # shellcheck source=/dev/null
 source "${VENV_DIR}/bin/activate"
 
-echo "==> Installing dependencies..."
+echo "==> Installing Python dependencies..."
 pip install --quiet --upgrade pip
 if [ -f "${SCRIPT_DIR}/pyproject.toml" ]; then
     pip install --quiet .
@@ -93,6 +93,11 @@ elif [ -f "${SCRIPT_DIR}/requirements.txt" ]; then
     pip install --quiet -r "${SCRIPT_DIR}/requirements.txt"
 elif ! command -v ansible-playbook &>/dev/null; then
     pip install --quiet ansible
+fi
+
+echo "==> Installing Ansible Galaxy dependencies..."
+if [ -f "${SCRIPT_DIR}/requirements.yml" ]; then
+    ansible-galaxy collection install -r "${SCRIPT_DIR}/requirements.yml" --upgrade --quiet
 fi
 
 echo "==> Verifying configuration and secret files..."
@@ -133,4 +138,3 @@ for pb in "${PLAYBOOKS[@]}"; do
 done
 
 echo "==> System deployment complete."
-
