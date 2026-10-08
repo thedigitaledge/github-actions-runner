@@ -2,7 +2,7 @@
 Containerized Lima KVM & GitHub Actions Runner Infrastructure
 =============================================================================
 
-This repository provides an automated, enterprise-grade Ansible deployment system for self-hosted **GitHub Actions Runners** executing inside a **Containerized Lima KVM Virtual Machine** with native hardware USB passthrough, `uhubctl` USB power cycling, persistent `udev` device mapping, workflow container execution (`container:` syntax), and automated hot-plug recovery.
+This repository provides an automated, enterprise-grade Ansible deployment system for self-hosted **GitHub Actions Runners** executing inside a **Containerized Lima KVM Virtual Machine** with native hardware USB passthrough, `uhubctl` USB power cycling, persistent `udev` device mapping, workflow container execution (`container:` syntax), automated hot-plug recovery, and background self-healing watchdogs.
 
 -----------------------------------------------------------------------------
 ARCHITECTURE OVERVIEW
@@ -14,13 +14,13 @@ ARCHITECTURE OVERVIEW
   | Host System (Linux / Silverblue / Fedora / RHEL)                        |
   |                                                                         |
   |  +-------------------------------------------------------------------+  |
-  |  | Podman Container: lima-vm-container                              |  |
+  |  | Podman Container: lima-vm-container                               |  |
   |  |                                                                   |  |
   |  |  +-------------------------------------------------------------+  |  |
   |  |  | Lima KVM Virtual Machine: github-runner (Ubuntu 24.04)      |  |  |
   |  |  |                                                             |  |  |
   |  |  |  - Podman Systemd Socket: /run/podman/podman.sock           |  |  |
-  |  |  |  - Shared Compilation Cache: /var/cache/ccache               |  |  |
+  |  |  |  - Shared Compilation Cache: /var/cache/ccache              |  |  |
   |  |  |  - udev Hot-Plug Handler: /usr/local/bin/segger-hotplug...  |  |  |
   |  |  |  - USB Power Control: uhubctl                               |  |  |
   |  |  |                                                             |  |  |
@@ -51,23 +51,27 @@ KEY FEATURES & CAPABILITIES
    * Configures a guest VM `udev` rule matching SEGGER USB IDs (Vendor `1366`, Product `1055`).
    * Automatically reloads `udev` rules and restarts offline runner containers when physical debug probes are re-connected.
 
-4. **GitHub Actions Workflow Container Execution (`container:` Keyword)**
+4. **Automated 15-Minute Self-Healing Watchdog**
+   * Deploys host systemd user timer (`github-runner-self-healing.timer`) and script (`self_healing_check.sh`).
+   * Continuously monitors host container, guest VM, and runner container states, automatically triggering recovery flags (`-a` or `-r`) upon failure.
+
+5. **GitHub Actions Workflow Container Execution (`container:` Keyword)**
    * Enables `podman.socket` inside the guest VM.
    * Bind-mounts `/run/podman/podman.sock` as `/var/run/docker.sock` into runner containers, allowing job steps to execute inside Docker/Podman build containers.
 
-5. **Shared `ccache` Compilation Cache**
+6. **Shared `ccache` Compilation Cache**
    * Mounts persistent `/var/cache/ccache` into runner containers as `/gh-runner/.cache/ccache`.
    * Accelerates embedded firmware compilation (Zephyr RTOS, ARM GCC) across workflow jobs.
 
-6. **Ephemeral Runner Isolation (`--once`)**
+7. **Ephemeral Runner Isolation (`--once`)**
    * Registers runner containers with the `--once` flag.
    * After processing a single workflow job, the container exits and Podman automatically spawns a fresh, isolated runner container instance.
 
-7. **Secure Keyring Secret Resolution**
+8. **Secure Keyring Secret Resolution**
    * Configures ``ansible.cfg`` to execute ``.secrets/vault_pass.sh``.
    * Resolves vault passwords hierarchically from `ANSIBLE_VAULT_PASSWORD` environment variable, GNOME Keyring (`secret-tool`), or `.secrets/ansible_vault_pass`.
 
-8. **Ansible Galaxy Collection Integration**
+9. **Ansible Galaxy Collection Integration**
    * Uses ``containers.podman`` modules for declarative container management.
    * Automated dependency installation via ``requirements.yml`` during setup.
 
@@ -93,6 +97,9 @@ All operations are managed through the ``./system_setup.sh`` setup wrapper scrip
 
   # Force re-creation of BOTH the Lima VM and runner containers
   ./system_setup.sh -a
+
+  # Force update/re-installation of Python & Ansible Galaxy dependencies
+  ./system_setup.sh -u
 
   # Perform a dry-run execution across playbooks (Ansible check mode)
   ./system_setup.sh -c
@@ -125,6 +132,19 @@ CONFIGURATION & VAULT SETUP
    .. code-block:: yaml
 
      github_pat: "ghp_yourPersonalAccessTokenHere"
+
+-----------------------------------------------------------------------------
+INFRASTRUCTURE ROADMAP (FUTURE DEVELOPMENTS)
+-----------------------------------------------------------------------------
+
+For detailed specifications on upcoming enhancements, see ``future_developments.rst.txt``:
+* **Security**: GitHub App Authentication, Rootless Podman Execution, PKCS#11 HSM Code Signing.
+* **Performance**: Pre-baked base runner container images, Workspace caching, MinIO S3 local storage.
+* **Observability**: Real-time Webhook alerting, Prometheus `node-exporter`, Live Serial/RTT Web Console streaming.
+* **Resiliency**: Hardware Probe `flock` Mutex Locking, Targeted `uhubctl` resets, USB fault injection harness.
+* **HIL Testing**: Sigrok Logic Analyzers, SocketCAN Passthrough, Remote Debug Server, SCPI PSU Control, Vision OCR UI Verification, RF Attenuator Control, Nordic PPK2 Power Profiling, Dynamic Hardware Board Farm Router.
+* **Resource Management**: Dynamic VM CPU/RAM auto-scaling & Podman image/volume auto-pruning.
+* **Tooling**: Interactive Terminal UI (`manage.sh`) & ARM64 Apple Silicon host support.
 
 -----------------------------------------------------------------------------
 DIAGNOSTICS & MONITORING
